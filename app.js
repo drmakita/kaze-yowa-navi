@@ -2,6 +2,7 @@ const queryInput = document.getElementById("query");
 const searchBtn = document.getElementById("searchBtn");
 const geoBtn = document.getElementById("geoBtn");
 const statusEl = document.getElementById("status");
+const accuracyEl = document.getElementById("accuracy");
 const cardsEl = document.getElementById("cards");
 const titleEl = document.getElementById("locationTitle");
 const tpl = document.getElementById("cardTpl");
@@ -24,6 +25,11 @@ const state = {
   lastLocation: null,
 };
 
+const cache = {
+  amedasTable: null,
+  amedasMapByKey: new Map(),
+};
+
 function judgeRisk(windMs) {
   if (windMs <= 2.5) return RISK.GOOD;
   if (windMs <= 4.0) return RISK.OK;
@@ -44,6 +50,10 @@ function dayText(isoTime) {
 
 function setStatus(text) {
   statusEl.textContent = text;
+}
+
+function setAccuracy(text) {
+  accuracyEl.textContent = text;
 }
 
 function setActivePeriodButton(period) {
@@ -80,6 +90,116 @@ function pickDailyRows(data, days) {
     .map((time, i) => ({ time, wind: data.daily.wind_speed_10m_max[i] }))
     .filter((row) => new Date(row.time).getTime() >= now - 24 * 60 * 60 * 1000)
     .slice(0, days);
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function toDecimalDegree([deg, min]) {
+  return deg + min / 60;
+}
+
+async function fetchAmedasTable() {
+  if (cache.amedasTable) return cache.amedasTable;
+  const res = await fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json");
+  if (!res.ok) throw new Error("アメダス地点情報の取得に失敗しました");
+  cache.amedasTable = await res.json();
+  return cache.amedasTable;
+}
+
+function findNearestAmedasStation(table, lat, lon) {
+  let best = null;
+  Object.entries(table).forEach(([id, row]) => {
+    if (!row.lat || !row.lon) return;
+    const stLat = toDecimalDegree(row.lat);
+    const stLon = toDecimalDegree(row.lon);
+    const distanceKm = haversineKm(lat, lon, stLat, stLon);
+    if (!best || distanceKm < best.distanceKm) {
+      best = {
+        id,
+        lat: stLat,
+        lon: stLon,
+        name: row.kjName || row.enName || id,
+        distanceKm,
+      };
+    }
+  });
+  return best;
+}
+
+function toAmedasHourKey(date) {
+  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(jst.getUTCDate()).padStart(2, "0");
+  const h = String(jst.getUTCHours()).padStart(2, "0");
+  return `${y}${m}${d}${h}00`;
+}
+
+async function fetchAmedasMapByHourKey(hourKey) {
+  if (cache.amedasMapByKey.has(hourKey)) return cache.amedasMapByKey.get(hourKey);
+  const res = await fetch(`https://www.jma.go.jp/bosai/amedas/data/map/${hourKey}00.json`);
+  if (!res.ok) {
+    cache.amedasMapByKey.set(hourKey, null);
+    return null;
+  }
+  const data = await res.json();
+  cache.amedasMapByKey.set(hourKey, data);
+  return data;
+}
+
+async function renderObservedVsForecast(forecastData, lat, lon) {
+  try {
+    setAccuracy("実測比較（アメダス）を計算中...");
+    const table = await fetchAmedasTable();
+    const station = findNearestAmedasStation(table, lat, lon);
+    if (!station || station.distanceKm > 200) {
+      setAccuracy("実測比較: 近傍のアメダス観測所が見つかりませんでした。");
+      return;
+    }
+
+    const now = Date.now();
+    const from = now - 24 * 60 * 60 * 1000;
+    const points = forecastData.hourly.time
+      .map((time, i) => ({ time, wind: forecastData.hourly.wind_speed_10m[i] }))
+      .filter((row) => {
+        const t = new Date(row.time).getTime();
+        return t >= from && t <= now;
+      });
+
+    const keys = [...new Set(points.map((p) => toAmedasHourKey(new Date(p.time))))];
+    await Promise.all(keys.map((key) => fetchAmedasMapByHourKey(key)));
+
+    const diffs = [];
+    points.forEach((p) => {
+      const key = toAmedasHourKey(new Date(p.time));
+      const mapData = cache.amedasMapByKey.get(key);
+      const obsWind = mapData && mapData[station.id] && mapData[station.id].wind ? mapData[station.id].wind[0] : null;
+      if (typeof obsWind === "number" && Number.isFinite(obsWind)) {
+        diffs.push(Math.abs(p.wind - obsWind));
+      }
+    });
+
+    if (diffs.length === 0) {
+      setAccuracy(`実測比較: ${station.name}（約${station.distanceKm.toFixed(1)}km）で一致時刻データを取得できませんでした。`);
+      return;
+    }
+
+    const mae = diffs.reduce((sum, d) => sum + d, 0) / diffs.length;
+    setAccuracy(
+      `実測比較（アメダス: ${station.name} 約${station.distanceKm.toFixed(1)}km）: 過去24時間 ${diffs.length}点の平均絶対誤差 ${mae.toFixed(2)} m/s`,
+    );
+  } catch (err) {
+    setAccuracy("実測比較: 取得に失敗しました。");
+  }
 }
 
 function render(data) {
@@ -136,6 +256,7 @@ async function fetchForecast(lat, lon) {
   url.searchParams.set("longitude", lon);
   url.searchParams.set("hourly", "wind_speed_10m");
   url.searchParams.set("daily", "wind_speed_10m_max");
+  url.searchParams.set("past_days", "2");
   url.searchParams.set("forecast_days", "16");
   url.searchParams.set("timezone", "auto");
 
@@ -167,8 +288,10 @@ async function run(lat, lon, title) {
     state.lastLocation = { lat, lon, title };
     const forecast = await fetchForecast(lat, lon);
     render(forecast);
+    renderObservedVsForecast(forecast, lat, lon);
   } catch (err) {
     setStatus(err.message || "エラーが発生しました");
+    setAccuracy("実測比較: エラーが発生しました。");
   }
 }
 
