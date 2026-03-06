@@ -97,6 +97,26 @@ input {
   gap: 8px;
 }
 
+.period-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.period-btn {
+  background: #d9e8d4;
+  color: #214825;
+  border: 1px solid #b9cfb0;
+  padding: 8px 12px;
+}
+
+.period-btn.is-active {
+  background: #276e34;
+  color: #fff;
+  border-color: #276e34;
+}
+
 .chip {
   font-weight: 700;
   font-size: 0.9rem;

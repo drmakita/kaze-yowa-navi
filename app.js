@@ -5,11 +5,23 @@ const statusEl = document.getElementById("status");
 const cardsEl = document.getElementById("cards");
 const titleEl = document.getElementById("locationTitle");
 const tpl = document.getElementById("cardTpl");
+const periodButtons = document.querySelectorAll(".period-btn");
 
 const RISK = {
   GOOD: { label: "散布向き", className: "risk-good" },
   OK: { label: "軽作業向き", className: "risk-ok" },
   BAD: { label: "注意", className: "risk-bad" },
+};
+
+const PERIOD = {
+  "48h": { label: "48時間", hours: 48 },
+  "7d": { label: "1週間", hours: 24 * 7 },
+  "30d": { label: "1ヶ月", days: 30 },
+};
+
+const state = {
+  period: "48h",
+  lastLocation: null,
 };
 
 function judgeRisk(windMs) {
@@ -25,41 +37,96 @@ function hourText(isoTime) {
   ).padStart(2, "0")}:00`;
 }
 
+function dayText(isoTime) {
+  const d = new Date(isoTime);
+  return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function setStatus(text) {
   statusEl.textContent = text;
 }
 
-function render(data) {
-  cardsEl.innerHTML = "";
-  const now = Date.now();
-  const maxMs = now + 48 * 60 * 60 * 1000;
+function setActivePeriodButton(period) {
+  periodButtons.forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.period === period);
+  });
+}
 
-  const rows = data.hourly.time
+function renderCard({ timeLabel, windLabel, risk }) {
+  const node = tpl.content.cloneNode(true);
+  node.querySelector(".time").textContent = timeLabel;
+  node.querySelector(".wind").textContent = windLabel;
+  const riskEl = node.querySelector(".risk");
+  riskEl.textContent = risk.label;
+  riskEl.classList.add(risk.className);
+  cardsEl.appendChild(node);
+}
+
+function pickHourlyRows(data, hours) {
+  const now = Date.now();
+  const maxMs = now + hours * 60 * 60 * 1000;
+  return data.hourly.time
     .map((time, i) => ({ time, wind: data.hourly.wind_speed_10m[i] }))
     .filter((row) => {
       const t = new Date(row.time).getTime();
       return t >= now && t <= maxMs;
     });
+}
+
+function pickDailyRows(data, days) {
+  if (!data.daily || !data.daily.time || !data.daily.wind_speed_10m_max) return [];
+  const now = Date.now();
+  return data.daily.time
+    .map((time, i) => ({ time, wind: data.daily.wind_speed_10m_max[i] }))
+    .filter((row) => new Date(row.time).getTime() >= now - 24 * 60 * 60 * 1000)
+    .slice(0, days);
+}
+
+function render(data) {
+  cardsEl.innerHTML = "";
+
+  if (state.period === "30d") {
+    const rows = pickDailyRows(data, PERIOD["30d"].days);
+    if (rows.length === 0) {
+      setStatus("表示できる予報がありませんでした。");
+      return;
+    }
+
+    const goodCount = rows.filter((r) => judgeRisk(r.wind) === RISK.GOOD).length;
+    const note =
+      rows.length < PERIOD["30d"].days
+        ? `（API仕様により最大${rows.length}日分を表示）`
+        : "";
+    setStatus(`1ヶ月表示: 「散布向き」の日は ${goodCount} 日です。${note}`);
+
+    rows.forEach((row) => {
+      const risk = judgeRisk(row.wind);
+      renderCard({
+        timeLabel: dayText(row.time),
+        windLabel: `日最大風速 ${row.wind.toFixed(1)} m/s`,
+        risk,
+      });
+    });
+    return;
+  }
+
+  const rows = pickHourlyRows(data, PERIOD[state.period].hours);
 
   if (rows.length === 0) {
     setStatus("表示できる予報がありませんでした。");
     return;
   }
 
-  const best = rows.filter((r) => judgeRisk(r.wind) === RISK.GOOD);
-  setStatus(`48時間で「散布向き」は ${best.length} 時間あります。`);
+  const goodCount = rows.filter((r) => judgeRisk(r.wind) === RISK.GOOD).length;
+  setStatus(`${PERIOD[state.period].label}で「散布向き」は ${goodCount} 時間あります。`);
 
   rows.forEach((row) => {
-    const node = tpl.content.cloneNode(true);
     const risk = judgeRisk(row.wind);
-
-    node.querySelector(".time").textContent = hourText(row.time);
-    node.querySelector(".wind").textContent = `風速 ${row.wind.toFixed(1)} m/s`;
-    const riskEl = node.querySelector(".risk");
-    riskEl.textContent = risk.label;
-    riskEl.classList.add(risk.className);
-
-    cardsEl.appendChild(node);
+    renderCard({
+      timeLabel: hourText(row.time),
+      windLabel: `風速 ${row.wind.toFixed(1)} m/s`,
+      risk,
+    });
   });
 }
 
@@ -68,7 +135,8 @@ async function fetchForecast(lat, lon) {
   url.searchParams.set("latitude", lat);
   url.searchParams.set("longitude", lon);
   url.searchParams.set("hourly", "wind_speed_10m");
-  url.searchParams.set("forecast_days", "3");
+  url.searchParams.set("daily", "wind_speed_10m_max");
+  url.searchParams.set("forecast_days", "16");
   url.searchParams.set("timezone", "auto");
 
   const res = await fetch(url);
@@ -96,6 +164,7 @@ async function run(lat, lon, title) {
     setStatus("予報データを取得中...");
     cardsEl.innerHTML = "";
     titleEl.textContent = title;
+    state.lastLocation = { lat, lon, title };
     const forecast = await fetchForecast(lat, lon);
     render(forecast);
   } catch (err) {
@@ -133,4 +202,16 @@ geoBtn.addEventListener("click", () => {
     },
     { timeout: 10000 },
   );
+});
+
+periodButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.period = btn.dataset.period;
+    setActivePeriodButton(state.period);
+    if (!state.lastLocation) {
+      setStatus("地点を選択すると期間別の予報を表示できます。");
+      return;
+    }
+    run(state.lastLocation.lat, state.lastLocation.lon, state.lastLocation.title);
+  });
 });
