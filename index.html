@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>風よわナビ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <p class="eyebrow">農作業向け 風予報</p>
+        <h1>風よわナビ</h1>
+        <p class="sub">
+          農薬散布や軽作業に向いた「風が弱い時間帯」を一目で確認できます。
+        </p>
+      </header>
+
+      <section class="panel controls" aria-label="地点設定">
+        <div class="control-group">
+          <label for="query">地点検索</label>
+          <div class="search-row">
+            <input id="query" type="text" placeholder="例: 熊本県 菊池市" />
+            <button id="searchBtn" class="btn">検索</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>現在地</label>
+          <button id="geoBtn" class="btn secondary">現在地を使う</button>
+        </div>
+      </section>
+
+      <section class="panel summary" aria-live="polite">
+        <h2 id="locationTitle">地点を選択してください</h2>
+        <div class="legend">
+          <span class="chip good">散布向き</span>
+          <span class="chip ok">軽作業向き</span>
+          <span class="chip bad">注意</span>
+        </div>
+      </section>
+
+      <section>
+        <div id="status" class="status">データを取得するとここに結果を表示します。</div>
+        <div id="cards" class="cards"></div>
+      </section>
+    </main>
+
+    <template id="cardTpl">
+      <article class="card">
+        <p class="time"></p>
+        <p class="wind"></p>
+        <p class="risk"></p>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

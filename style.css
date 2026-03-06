@@ -1,0 +1,173 @@
+:root {
+  --bg-top: #eef7e9;
+  --bg-bottom: #d9eec9;
+  --panel: #ffffffdd;
+  --text: #123115;
+  --muted: #47634a;
+  --line: #cce0bd;
+  --good: #2f8f3a;
+  --ok: #c78500;
+  --bad: #c63f2d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Zen Kaku Gothic New", sans-serif;
+  color: var(--text);
+  background: linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 20px 16px 32px;
+}
+
+.hero h1 {
+  margin: 6px 0;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.sub {
+  margin: 0;
+  color: var(--muted);
+}
+
+.panel {
+  margin-top: 14px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  backdrop-filter: blur(2px);
+}
+
+.controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+
+.control-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+
+.search-row {
+  display: flex;
+  gap: 8px;
+}
+
+input {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 1rem;
+}
+
+.btn {
+  border: none;
+  background: #276e34;
+  color: #fff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 1rem;
+}
+
+.btn.secondary {
+  background: #4f6f57;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  font-weight: 700;
+  font-size: 0.9rem;
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #fff;
+}
+
+.chip.good {
+  background: var(--good);
+}
+
+.chip.ok {
+  background: var(--ok);
+}
+
+.chip.bad {
+  background: var(--bad);
+}
+
+.status {
+  margin: 14px 2px;
+  color: var(--muted);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.card .time {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.card .wind {
+  margin: 8px 0 2px;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.card .risk {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.risk-good {
+  color: var(--good);
+}
+
+.risk-ok {
+  color: var(--ok);
+}
+
+.risk-bad {
+  color: var(--bad);
+}
+
+@media (min-width: 760px) {
+  .controls {
+    grid-template-columns: 2fr 1fr;
+    align-items: end;
+  }
+}
