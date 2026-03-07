@@ -148,6 +148,45 @@ input {
   font-size: 0.95rem;
 }
 
+.history-title {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.history-status {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.history-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.history-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.history-card .time {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
+.history-card .value {
+  margin: 2px 0;
+  font-size: 0.92rem;
+}
+
+.history-card .diff {
+  margin: 6px 0 0;
+  font-weight: 700;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));

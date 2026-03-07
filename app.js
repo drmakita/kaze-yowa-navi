@@ -3,6 +3,8 @@ const searchBtn = document.getElementById("searchBtn");
 const geoBtn = document.getElementById("geoBtn");
 const statusEl = document.getElementById("status");
 const accuracyEl = document.getElementById("accuracy");
+const historyStatusEl = document.getElementById("historyStatus");
+const historyCardsEl = document.getElementById("historyCards");
 const cardsEl = document.getElementById("cards");
 const titleEl = document.getElementById("locationTitle");
 const tpl = document.getElementById("cardTpl");
@@ -54,6 +56,10 @@ function setStatus(text) {
 
 function setAccuracy(text) {
   accuracyEl.textContent = text;
+}
+
+function setHistoryStatus(text) {
+  historyStatusEl.textContent = text;
 }
 
 function setActivePeriodButton(period) {
@@ -159,15 +165,18 @@ async function fetchAmedasMapByHourKey(hourKey) {
 async function renderObservedVsForecast(forecastData, lat, lon) {
   try {
     setAccuracy("実測比較（アメダス）を計算中...");
+    setHistoryStatus("過去2日間の予測と実績を取得中...");
+    historyCardsEl.innerHTML = "";
     const table = await fetchAmedasTable();
     const station = findNearestAmedasStation(table, lat, lon);
     if (!station || station.distanceKm > 200) {
       setAccuracy("実測比較: 近傍のアメダス観測所が見つかりませんでした。");
+      setHistoryStatus("過去2日間比較: 近傍のアメダス観測所が見つかりませんでした。");
       return;
     }
 
     const now = Date.now();
-    const from = now - 24 * 60 * 60 * 1000;
+    const from = now - 48 * 60 * 60 * 1000;
     const points = forecastData.hourly.time
       .map((time, i) => ({ time, wind: forecastData.hourly.wind_speed_10m[i] }))
       .filter((row) => {
@@ -179,26 +188,50 @@ async function renderObservedVsForecast(forecastData, lat, lon) {
     await Promise.all(keys.map((key) => fetchAmedasMapByHourKey(key)));
 
     const diffs = [];
+    const historyRows = [];
     points.forEach((p) => {
       const key = toAmedasHourKey(new Date(p.time));
       const mapData = cache.amedasMapByKey.get(key);
       const obsWind = mapData && mapData[station.id] && mapData[station.id].wind ? mapData[station.id].wind[0] : null;
       if (typeof obsWind === "number" && Number.isFinite(obsWind)) {
-        diffs.push(Math.abs(p.wind - obsWind));
+        const diff = Math.abs(p.wind - obsWind);
+        diffs.push(diff);
+        historyRows.push({
+          time: p.time,
+          forecast: p.wind,
+          observed: obsWind,
+          diff,
+        });
       }
     });
 
     if (diffs.length === 0) {
       setAccuracy(`実測比較: ${station.name}（約${station.distanceKm.toFixed(1)}km）で一致時刻データを取得できませんでした。`);
+      setHistoryStatus("過去2日間比較: 一致時刻の実測データを取得できませんでした。");
       return;
     }
 
     const mae = diffs.reduce((sum, d) => sum + d, 0) / diffs.length;
     setAccuracy(
-      `実測比較（アメダス: ${station.name} 約${station.distanceKm.toFixed(1)}km）: 過去24時間 ${diffs.length}点の平均絶対誤差 ${mae.toFixed(2)} m/s`,
+      `実測比較（アメダス: ${station.name} 約${station.distanceKm.toFixed(1)}km）: 過去2日間 ${diffs.length}点の平均絶対誤差 ${mae.toFixed(2)} m/s`,
     );
+
+    historyRows.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+    historyRows.forEach((row) => {
+      const card = document.createElement("article");
+      card.className = "history-card";
+      card.innerHTML = `
+        <p class="time">${hourText(row.time)}</p>
+        <p class="value">予測: ${row.forecast.toFixed(1)} m/s</p>
+        <p class="value">実績: ${row.observed.toFixed(1)} m/s</p>
+        <p class="diff">差分: ${row.diff.toFixed(1)} m/s</p>
+      `;
+      historyCardsEl.appendChild(card);
+    });
+    setHistoryStatus(`表示中: ${station.name} の過去2日間 ${historyRows.length}件`);
   } catch (err) {
     setAccuracy("実測比較: 取得に失敗しました。");
+    setHistoryStatus("過去2日間比較: 取得に失敗しました。");
   }
 }
 
@@ -292,6 +325,8 @@ async function run(lat, lon, title) {
   } catch (err) {
     setStatus(err.message || "エラーが発生しました");
     setAccuracy("実測比較: エラーが発生しました。");
+    setHistoryStatus("過去2日間比較: エラーが発生しました。");
+    historyCardsEl.innerHTML = "";
   }
 }
 
