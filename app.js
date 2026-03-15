@@ -1,4 +1,5 @@
 const queryInput = document.getElementById("query");
+const suggestionsEl = document.getElementById("suggestions");
 const searchBtn = document.getElementById("searchBtn");
 const geoBtn = document.getElementById("geoBtn");
 const statusEl = document.getElementById("status");
@@ -32,12 +33,15 @@ const state = {
   maeByModel: {},
   weightsByModel: {},
   terrainAdjustment: 0,
+  selectedPlace: null,
 };
 
 const cache = {
   amedasTable: null,
   amedasMapByKey: new Map(),
 };
+
+let suggestTimer = null;
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -275,16 +279,133 @@ async function fetchForecast(lat, lon) {
   return res.json();
 }
 
-async function geocode(name) {
+async function fetchGeocodeResults(name, count) {
   const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
   url.searchParams.set("name", name);
-  url.searchParams.set("count", "1");
+  url.searchParams.set("count", String(count));
   url.searchParams.set("language", "ja");
   const res = await fetch(url);
   if (!res.ok) throw new Error("地点検索に失敗しました");
   const data = await res.json();
-  if (!data.results || data.results.length === 0) throw new Error("地点が見つかりませんでした");
-  return data.results[0];
+  if (data.results && data.results.length > 0) return data.results;
+
+  const fallbackUrl = new URL("https://geocoding-api.open-meteo.com/v1/search");
+  fallbackUrl.searchParams.set("name", name);
+  fallbackUrl.searchParams.set("count", String(count));
+  const fallbackRes = await fetch(fallbackUrl);
+  if (!fallbackRes.ok) throw new Error("地点検索に失敗しました");
+  const fallbackData = await fallbackRes.json();
+  if (fallbackData.results && fallbackData.results.length > 0) return fallbackData.results;
+  return fetchNominatimResults(name, count);
+}
+
+function scoreNominatimCandidate(item) {
+  const t = item.addresstype || item.type || "";
+  const c = item.category || "";
+  let score = Number(item.importance || 0) * 10;
+  if (["city", "town", "village", "municipality", "administrative"].includes(t)) score += 100;
+  if (c === "boundary") score += 60;
+  if (c === "railway") score += 20;
+  if (c === "highway") score -= 20;
+  return score;
+}
+
+function mapNominatim(item) {
+  const addr = item.address || {};
+  const admin1 = addr.province || addr.state || "";
+  const name =
+    addr.city ||
+    addr.town ||
+    addr.village ||
+    addr.municipality ||
+    item.name ||
+    (item.display_name ? item.display_name.split(",")[0] : "地点");
+  return {
+    name,
+    admin1,
+    admin2: "",
+    country: addr.country || "日本",
+    latitude: Number(item.lat),
+    longitude: Number(item.lon),
+    elevation: null,
+  };
+}
+
+async function fetchNominatimResults(name, count) {
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("countrycodes", "jp");
+  url.searchParams.set("accept-language", "ja");
+  url.searchParams.set("q", name);
+  url.searchParams.set("limit", String(Math.max(6, count)));
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const raw = await res.json();
+  const items = Array.isArray(raw) ? raw : [];
+  return items
+    .sort((a, b) => scoreNominatimCandidate(b) - scoreNominatimCandidate(a))
+    .map(mapNominatim)
+    .filter((x) => Number.isFinite(x.latitude) && Number.isFinite(x.longitude))
+    .slice(0, count);
+}
+
+async function geocode(name) {
+  const results = await fetchGeocodeResults(name, 1);
+  if (!results.length) throw new Error("地点が見つかりませんでした");
+  return results[0];
+}
+
+async function geocodeCandidates(name) {
+  return fetchGeocodeResults(name, 6);
+}
+
+function formatPlaceLabel(hit) {
+  const parts = [hit.admin1, hit.admin2, hit.name].filter(Boolean);
+  const unique = [];
+  parts.forEach((p) => {
+    if (!unique.includes(p)) unique.push(p);
+  });
+  return unique.join("");
+}
+
+function clearSuggestions() {
+  suggestionsEl.innerHTML = "";
+  suggestionsEl.hidden = true;
+}
+
+function selectPlace(hit) {
+  state.selectedPlace = hit;
+  queryInput.value = formatPlaceLabel(hit);
+  clearSuggestions();
+}
+
+function renderSuggestions(hits) {
+  if (!hits.length) {
+    clearSuggestions();
+    return;
+  }
+  const seen = new Set();
+  suggestionsEl.innerHTML = "";
+  hits.forEach((hit) => {
+    const label = formatPlaceLabel(hit);
+    if (seen.has(label)) return;
+    seen.add(label);
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "suggestion-btn";
+    btn.textContent = label;
+    const pick = (e) => {
+      e.preventDefault();
+      selectPlace(hit);
+    };
+    btn.addEventListener("mousedown", pick);
+    btn.addEventListener("click", pick);
+    li.appendChild(btn);
+    suggestionsEl.appendChild(li);
+  });
+  suggestionsEl.hidden = false;
 }
 
 async function buildObservedSeries(stations, hourKeys) {
@@ -462,11 +583,50 @@ searchBtn.addEventListener("click", async () => {
   }
   try {
     setStatus("地点を検索中...");
-    const hit = await geocode(q);
-    run(hit.latitude, hit.longitude, `${hit.name} (${hit.country || ""})`, hit.elevation);
+    const hit = state.selectedPlace || (await geocode(q));
+    queryInput.value = formatPlaceLabel(hit);
+    clearSuggestions();
+    run(hit.latitude, hit.longitude, `${formatPlaceLabel(hit)} (${hit.country || ""})`, hit.elevation);
   } catch (err) {
     setStatus(err.message || "検索に失敗しました");
   }
+});
+
+queryInput.addEventListener("input", () => {
+  state.selectedPlace = null;
+  const q = queryInput.value.trim();
+  clearTimeout(suggestTimer);
+  if (q.length < 2) {
+    clearSuggestions();
+    return;
+  }
+  suggestTimer = setTimeout(async () => {
+    try {
+      const hits = await geocodeCandidates(q);
+      renderSuggestions(hits);
+    } catch {
+      clearSuggestions();
+    }
+  }, 250);
+});
+
+queryInput.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (!suggestionsEl.hidden && suggestionsEl.firstChild) {
+    const firstBtn = suggestionsEl.querySelector(".suggestion-btn");
+    if (firstBtn) {
+      e.preventDefault();
+      firstBtn.click();
+      searchBtn.click();
+    }
+    return;
+  }
+  e.preventDefault();
+  searchBtn.click();
+});
+
+queryInput.addEventListener("blur", () => {
+  setTimeout(clearSuggestions, 120);
 });
 
 geoBtn.addEventListener("click", () => {

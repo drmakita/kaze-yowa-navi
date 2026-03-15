@@ -26,7 +26,10 @@
         <div class="control-group">
           <label for="query">地点検索</label>
           <div class="search-row">
-            <input id="query" type="text" placeholder="例: 熊本県 菊池市" />
+            <div class="search-input-wrap">
+              <input id="query" type="text" placeholder="例: 熊本県 菊池市" autocomplete="off" />
+              <ul id="suggestions" class="suggestions" hidden></ul>
+            </div>
             <button id="searchBtn" class="btn">検索</button>
           </div>
         </div>
